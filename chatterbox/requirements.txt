@@ -1,0 +1,7 @@
+flask
+torch
+torchaudio
+chatterbox-tts
+
+
+# Add any TTS-specific packages like chatterbox-tts, transformers, etc.
