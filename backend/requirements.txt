@@ -1,0 +1,12 @@
+fastapi==0.115.12
+uvicorn==0.28.1
+numpy
+python-multipart==0.0.20
+moviepy==1.0.3
+whisperx==3.4.2
+torch==2.6.0
+torchaudio==2.6.0
+googletrans==3.1.0a0
+nest-asyncio==1.6.0
+chatterbox-tts==0.1.4
+# python-ffmpeg
