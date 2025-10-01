@@ -57,7 +57,7 @@ async def generate_audio(
             temp_audio.write(content)
             temp_audio_path = temp_audio.name
 
-            all_wavs = []
+        all_wavs = []
     
         # Create silence tensor
         silence_samples = int(silence_duration * model.sr)
@@ -146,6 +146,6 @@ async def generate_audio(
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-# 👇 Add run command here
-if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=3000)
+# # 👇 Add run command here
+# if __name__ == "__main__":
+#     uvicorn.run("app:app", host="0.0.0.0", port=3000)
