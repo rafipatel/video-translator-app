@@ -15,7 +15,7 @@ WORKDIR /app
 # Copy the application code
 COPY app.py .
 COPY requirements.txt .
-COPY .cache/huggingface /root/.cache/huggingface
+# COPY .cache/huggingface /root/.cache/huggingface
 
 # Install numpy first (it's a common dependency that might be needed early)
 RUN pip install --no-cache-dir numpy
