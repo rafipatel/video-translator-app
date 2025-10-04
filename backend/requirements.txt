@@ -8,5 +8,6 @@ torch==2.6.0
 torchaudio==2.6.0
 googletrans==3.1.0a0
 nest-asyncio==1.6.0
-chatterbox-tts==0.1.4
+streamlit
+# chatterbox-tts==0.1.4
 # python-ffmpeg
