@@ -11,6 +11,7 @@ import time
 import logging
 from typing import List, Dict
 from pathlib import Path
+from deep_translator import GoogleTranslator
 
 # Configure logging
 logging.basicConfig(
@@ -194,23 +195,20 @@ def transcribe(full_audio_path, whisper_model, progress_callback=None):
     result['language_code'] = detected_language
     return result
 
-def translate_segments(segments, target_lang="hi", progress_callback=None):
-    """Translate segments to target language"""
-    from googletrans import Translator
-    
+def translate_segments(segments: List[Dict], target_lang: str) -> List[Dict]:
+    """Translate segments to target language using deep-translator"""
     results = []
-    translator = Translator()
-    total = len(segments)
-    
-    for idx, seg in enumerate(segments):
-        if progress_callback:
-            progress_callback(f"Translating segment {idx+1}/{total}...")
-        
+    translator = GoogleTranslator(source='auto', target=target_lang)
+    for seg in segments:
         clean_seg = {k: v for k, v in seg.items() if k != "words"}
-        result = translator.translate(clean_seg["text"], dest=target_lang)
-        clean_seg["translated_text"] = result.text
+        
+        if not clean_seg["text"] or clean_seg["text"].isspace():
+            translated_text = ""
+        else:
+            translated_text = translator.translate(clean_seg["text"])
+        
+        clean_seg["translated_text"] = translated_text
         results.append(clean_seg)
-    
     return results
 
 def replace_video_audio(video_path, new_audio_path, output_video_path):
@@ -342,11 +340,7 @@ def main():
                 
                 # Step 4: Translate
                 status_text.text("Translating segments...")
-                translated_segments = translate_segments(
-                    transcription['segments'],
-                    target_language,
-                    progress_callback=status_text.text
-                )
+                translated_segments = translate_segments(transcription['segments'], target_language)
                 progress_bar.progress(0.6)
                 st.success(f"Translated {len(translated_segments)} segments")
                 
@@ -357,7 +351,7 @@ def main():
                 tts_progress = st.progress(0)
                 tts_status = st.empty()
                 
-                try:
+                try:    
                     generate_translated_audio_via_service(
                         reference_audio_path=audio_path,
                         segments=translated_segments,
