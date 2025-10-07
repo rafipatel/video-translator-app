@@ -12,6 +12,10 @@ from starlette.background import BackgroundTask
 import uuid
 from typing import Dict
 import json
+import nest_asyncio
+from pyngrok import ngrok
+from pyngrok.conf import PyngrokConfig
+import numpy as np
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
 
@@ -32,7 +36,7 @@ app = FastAPI()
 # In-memory job storage (use Redis in production)
 jobs: Dict[str, dict] = {}
 
-def process_audio_task(job_id: str, temp_audio_path: str, segments: list, silence_duration: float):
+def process_audio_task(job_id: str, temp_audio_path: str, segments: list, silence_duration: float, target_language: str):
     """Background task to process audio"""
     try:
         jobs[job_id]["status"] = "processing"
@@ -42,18 +46,22 @@ def process_audio_task(job_id: str, temp_audio_path: str, segments: list, silenc
         silence = torch.zeros(1, silence_samples)
         
         total_segments = len(segments)
+
+        # ...existing code...
+        cursor_time = 0.0  # current time position (seconds) in the output timeline
+        total_segments = len(segments)
+
         
+# ...existing code...
         for counter, segment in enumerate(segments):
-            logging.info(f"Job {job_id}: Synthesizing line {counter+1}/{total_segments}: {segment['translated_text']}")
-            
-            # Update progress
-            jobs[job_id]["progress"] = f"{counter + 1}/{total_segments}"
-            
             original_duration = segment['end'] - segment['start']
+
+            logging.info(f"Generating audio for text: {segment['translated_text']}")
             
+            # Generate audio for this segment
             wav = model.generate(
                 segment['translated_text'], 
-                "hi", 
+                target_language, 
                 audio_prompt_path=temp_audio_path, 
                 exaggeration=0.2,
                 cfg_weight=0.8,
@@ -64,18 +72,86 @@ def process_audio_task(job_id: str, temp_audio_path: str, segments: list, silenc
             )
             
             generated_duration = wav.shape[-1] / model.sr
-            speed_factor = generated_duration / original_duration
             
-            if speed_factor > 1.1 or speed_factor < 0.9:
-                logging.info(f"  Applying speed factor: {speed_factor:.2f}x")
+            # Add leading silence for the first segment (from 0.0 to segment start)
+            if counter == 0 and segment['start'] > 0:
+                leading_silence_duration = segment['start']
+                leading_silence_samples = int(leading_silence_duration * model.sr)
+                leading_silence = torch.zeros((wav.shape[0], leading_silence_samples), dtype=wav.dtype, device=wav.device)
+                all_wavs.append(leading_silence)
+            
+            # Handle duration matching
+            if generated_duration < original_duration:
+                # Generated audio is shorter - add it as is
+                all_wavs.append(wav)
+                
+                # Add trailing silence to match original segment duration
+                trailing_silence_duration = original_duration - generated_duration
+                trailing_silence_samples = int(trailing_silence_duration * model.sr)
+                if trailing_silence_samples > 0:
+                    trailing_silence = torch.zeros((wav.shape[0], trailing_silence_samples), dtype=wav.dtype, device=wav.device)
+                    all_wavs.append(trailing_silence)
+            
+            elif generated_duration > original_duration:
+                # Generated audio is longer - speed it up to fit
+                speed_factor = generated_duration / original_duration
                 speed_transform = transforms.Speed(model.sr, speed_factor)
-                wav_adjusted, _ = speed_transform(wav)
+                wav_adjusted, _ = speed_transform(wav)  # Fixed typo here
                 all_wavs.append(wav_adjusted)
+            
             else:
+                # Duration matches perfectly
                 all_wavs.append(wav)
             
+            # Add silence between segments (not after the last segment)
             if counter < len(segments) - 1:
-                all_wavs.append(silence)
+                next_segment = segments[counter + 1]
+                gap_duration = next_segment['start'] - segment['end']
+                
+                if gap_duration > 0:
+                    gap_samples = int(gap_duration * model.sr)
+                    gap_silence = torch.zeros((wav.shape[0], gap_samples), dtype=wav.dtype, device=wav.device)
+                    all_wavs.append(gap_silence)
+# ...existing code...
+                    
+            # if counter < len(segments) - 1:
+            #     all_wavs.append(silence)
+# ...existing code...
+        # ...existing code...
+        
+        # for counter, segment in enumerate(segments):
+        #     logging.info(f"Job {job_id}: Synthesizing line {counter+1}/{total_segments}: {segment['translated_text']}")
+            
+        #     # Update progress
+        #     jobs[job_id]["progress"] = f"{counter + 1}/{total_segments}"
+            
+        #     original_duration = segment['end'] - segment['start']
+            
+        #     wav = model.generate(
+        #         segment['translated_text'], 
+        #         "hi", 
+        #         audio_prompt_path=temp_audio_path, 
+        #         exaggeration=0.2,
+        #         cfg_weight=0.8,
+        #         temperature=0.4,
+        #         repetition_penalty=1.2,
+        #         min_p=0.05,
+        #         top_p=0.9
+        #     )
+            
+        #     generated_duration = wav.shape[-1] / model.sr
+        #     speed_factor = generated_duration / original_duration
+            
+        #     if speed_factor > 1.1 or speed_factor < 0.9:
+        #         logging.info(f"  Applying speed factor: {speed_factor:.2f}x")
+        #         speed_transform = transforms.Speed(model.sr, speed_factor)
+        #         wav_adjusted, _ = speed_transform(wav)
+        #         all_wavs.append(wav_adjusted)
+        #     else:
+        #         all_wavs.append(wav)
+            
+        #     if counter < len(segments) - 1:
+        #         all_wavs.append(silence)
         
         # Save output
         output_path = f"/tmp/audio_{job_id}.wav"
@@ -109,6 +185,7 @@ async def generate_audio_async(
     file: UploadFile = File(...),
     segments: str = Form(...),
     silence_duration: float = Form(0.5),
+    target_language: str = Form("en"),
 ):
     """
     Submit a job to generate audio asynchronously.
@@ -116,6 +193,8 @@ async def generate_audio_async(
     """
     try:
         segments_list = json.loads(segments)
+        print("/+"*50)
+        print(segments_list)
         
         if not isinstance(segments_list, list) or len(segments_list) == 0:
             return JSONResponse(content={"error": "Segments must be a non-empty list."}, status_code=400)
@@ -140,7 +219,8 @@ async def generate_audio_async(
             job_id,
             temp_audio_path,
             segments_list,
-            silence_duration
+            silence_duration,
+            target_language
         )
         
         logging.info(f"Created job {job_id} with {len(segments_list)} segments")
@@ -307,10 +387,22 @@ async def generate_audio(
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-# if __name__ == "__main__":
-#     uvicorn.run(
-#         app, 
-#         host="0.0.0.0", 
-#         port=4000,
-#         timeout_keep_alive=300
-#     )
+if __name__ == "__main__":
+
+    from pyngrok import ngrok
+    ngrok.set_auth_token("32nSW2h5fsy2co2l6HDrKOyxSZA_jY1UfGjXm51Hn3B3NqBC")
+
+    # Apply nest_asyncio to allow nested event loops
+    nest_asyncio.apply()
+
+    # Open an ngrok tunnel to the HTTP server
+    public_url = ngrok.connect(4000)
+    print("✅ Public URL:", public_url)
+
+    # For development — start the FastAPI app
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=4000,
+        timeout_keep_alive=300
+    )
